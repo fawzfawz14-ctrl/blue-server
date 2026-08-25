@@ -1,0 +1,9 @@
+{
+  "name": "blue-server",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "server.js",
+  "dependencies": {
+    "socket.io": "^4.8.3"
+  }
+}
