@@ -12,6 +12,9 @@ console.log(`🚀 Blue Server is running on port ${PORT}`);
 // الشكل: { "Lobby": [ { id, username, avatar } ], "Gaming Room": [ ... ] }
 const voiceRooms = {};
 
+// مصفوفة لحفظ تاريخ الشات والرسومات حتى لا تختفي أبداً عند إعادة الإقلاع أو دخول شخص جديد
+const messageHistory = [];
+
 // دالة مساعدة لإرسال التحديثات لجميع المتصلين
 function broadcastVoiceRooms() {
   io.emit("update_voice_rooms", voiceRooms);
@@ -42,8 +45,18 @@ io.on("connection", (socket) => {
   // إرسال الحالة الحالية للغرف الصوتية للمستخدم الجديد فور اتصاله
   socket.emit("update_voice_rooms", voiceRooms);
 
-  // استقبال الرسائل والرسومات
+  // إرسال تاريخ الرسائل والرسومات القديمة للمستخدم الجديد فور اتصاله
+  socket.emit("load_history", messageHistory);
+
+  // استقبال الرسائل والرسومات وحفظها في الذاكرة
   socket.on("send_message", (data) => {
+    messageHistory.push(data);
+    
+    // حد أقصى للرسائل (مثلاً آخر 150 رسالة) لكي يبقى السيرفر خفيفاً وسريعاً
+    if (messageHistory.length > 150) {
+      messageHistory.shift();
+    }
+
     io.emit("receive_message", data);
   });
 
