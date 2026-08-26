@@ -7,21 +7,87 @@ const io = new Server(PORT, {
 });
 
 console.log(`🚀 Blue Server is running on port ${PORT}`);
-console.log("🚀 Blue Server is running on port 3000");
+
+// كائن لتخزين بيانات الأعضاء داخل كل غرفة صوتية
+// الشكل: { "Lobby": [ { id, username, avatar } ], "Gaming Room": [ ... ] }
+const voiceRooms = {};
+
+// دالة مساعدة لإرسال التحديثات لجميع المتصلين
+function broadcastVoiceRooms() {
+  io.emit("update_voice_rooms", voiceRooms);
+}
+
+// دالة لإزالة المستخدم من أي غرفة صوتية كان متواجداً فيها
+function removeUserFromVoice(socketId) {
+  let updated = false;
+  for (const roomName in voiceRooms) {
+    const originalLength = voiceRooms[roomName].length;
+    voiceRooms[roomName] = voiceRooms[roomName].filter(user => user.id !== socketId);
+    if (voiceRooms[roomName].length !== originalLength) {
+      updated = true;
+    }
+    // تنظيف الغرفة إذا أصبحت فارغة
+    if (voiceRooms[roomName].length === 0) {
+      delete voiceRooms[roomName];
+    }
+  }
+  if (updated) {
+    broadcastVoiceRooms();
+  }
+}
 
 io.on("connection", (socket) => {
   console.log(`✅ A user connected: ${socket.id}`);
 
+  // إرسال الحالة الحالية للغرف الصوتية للمستخدم الجديد فور اتصاله
+  socket.emit("update_voice_rooms", voiceRooms);
+
+  // استقبال الرسائل والرسومات
   socket.on("send_message", (data) => {
     io.emit("receive_message", data);
   });
 
-  socket.on("join_voice_room", (roomName) => {
+  // الانضمام للغرفة الصوتية (يدعم الكائن الجديد أو الاسم القديم)
+  socket.on("join_voice_room", (data) => {
+    let roomName = "";
+    let username = "User";
+    let avatar = "";
+
+    if (typeof data === "object" && data !== null) {
+      roomName = data.room;
+      username = data.username || "User";
+      avatar = data.avatar || "";
+    } else {
+      roomName = data;
+    }
+
+    if (!roomName) return;
+
+    // إذا كان المستخدم في غرفة سابقة، نحذفه منها أولاً
+    removeUserFromVoice(socket.id);
+
     socket.join(roomName);
     socket.roomName = roomName;
+
+    // إضافة المستخدم لقائمة الغرفة الصوتية
+    if (!voiceRooms[roomName]) {
+      voiceRooms[roomName] = [];
+    }
+    
+    voiceRooms[roomName].push({
+      id: socket.id,
+      username: username,
+      avatar: avatar
+    });
+
+    // إشعار باقي المتواجدين في الغرفة لإجراء اتصال WebRTC
     socket.to(roomName).emit("user_joined_voice", socket.id);
+
+    // إرسال التحديث للجميع لتظهر الصورة والاسم تحت القناة الصوتية
+    broadcastVoiceRooms();
   });
 
+  // إشارات WebRTC للصوت
   socket.on("voice_offer", ({ target, offer }) => {
     io.to(target).emit("voice_offer", { sender: socket.id, offer });
   });
@@ -34,15 +100,20 @@ io.on("connection", (socket) => {
     io.to(target).emit("ice_candidate", { sender: socket.id, candidate });
   });
 
+  // مغادرة الغرفة الصوتية
   socket.on("leave_voice_room", (roomName) => {
     socket.leave(roomName);
     socket.to(roomName).emit("user_left_voice", socket.id);
+    removeUserFromVoice(socket.id);
+    socket.roomName = null;
   });
 
+  // عند قطع الاتصال
   socket.on("disconnect", () => {
     if (socket.roomName) {
       socket.to(socket.roomName).emit("user_left_voice", socket.id);
     }
+    removeUserFromVoice(socket.id);
     console.log(`❌ User disconnected: ${socket.id}`);
   });
 });
